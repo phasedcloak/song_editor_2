@@ -1,0 +1,42 @@
+# Additional libraries needed for new features
+# These are in addition to the existing requirements.txt
+
+# For JSON schema validation (optional but recommended)
+jsonschema>=4.17.3
+
+# For better JSON handling and validation
+pydantic>=2.0.0
+
+# For audio playback improvements (if not already included)
+pyaudio>=0.2.11
+sounddevice>=0.4.6
+
+# For better UI styling and components
+qt-material>=2.14
+
+# For testing the new features
+pytest>=7.0.0
+pytest-qt>=4.2.0
+
+# For development and debugging
+ipython>=8.0.0
+jupyter>=1.0.0
+
+# For audio file format support (if not already included)
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# For MIDI export improvements (if not already included)
+mido>=1.3.0
+python-rtmidi>=1.5.0
+
+# For data validation and type checking
+typing-extensions>=4.5.0
+dataclasses-json>=0.6.0
+
+# For better error handling and logging
+loguru>=0.7.0
+
+# For configuration management
+pyyaml>=6.0.0
+toml>=0.10.0

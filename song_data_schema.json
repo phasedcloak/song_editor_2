@@ -1,0 +1,250 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Song Editor 2 Data Schema",
+  "description": "Schema for importing pre-processed lyric and chord transcription data with support for alternative transcriptions (OpenAI Whisper)",
+  "type": "object",
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "description": "Metadata about the transcription",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Schema version",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "default": "2.0.0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the transcription was created"
+        },
+        "source_audio": {
+          "type": "string",
+          "description": "Original audio file path"
+        },
+        "processing_tool": {
+          "type": "string",
+          "description": "Tool used to generate the transcription"
+        },
+        "confidence_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Confidence threshold used for filtering"
+        },
+        "whisper_model": {
+          "type": "string",
+          "description": "Whisper model used for transcription (e.g., 'mlx-community/whisper-large-v2-mlx', 'openai-whisper')"
+        },
+        "alternatives_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of alternative transcriptions generated per word (0 for MLX Whisper, >0 for OpenAI Whisper)"
+        }
+      },
+      "required": ["version", "created_at", "source_audio"]
+    },
+    "words": {
+      "type": "array",
+      "description": "Array of transcribed words with timing, confidence, and alternative transcriptions",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The transcribed word text (primary transcription)"
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Start time in seconds"
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "End time in seconds"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Confidence score for this word"
+          },
+          "alternatives": {
+            "type": "array",
+            "description": "Alternative transcriptions for this word (OpenAI Whisper only)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Alternative word text"
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 1.0,
+                  "description": "Confidence score for this alternative"
+                }
+              },
+              "required": ["text", "confidence"]
+            },
+            "default": []
+          },
+          "chord": {
+            "type": "object",
+            "description": "Associated chord information",
+            "properties": {
+              "symbol": {
+                "type": "string",
+                "description": "Full chord symbol (e.g., 'Cmaj7', 'Am', 'D7')"
+              },
+              "root": {
+                "type": "string",
+                "description": "Chord root note (e.g., 'C', 'F#', 'Bb')"
+              },
+              "quality": {
+                "type": "string",
+                "description": "Chord quality (e.g., 'maj', 'min', '7', 'maj7', 'dim', 'aug')"
+              },
+              "bass": {
+                "type": ["string", "null"],
+                "description": "Bass note for inversions (e.g., 'E' for C/E)"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Confidence score for chord detection"
+              }
+            },
+            "required": ["symbol", "root", "quality"]
+          }
+        },
+        "required": ["text", "start", "end", "confidence"]
+      }
+    },
+    "chords": {
+      "type": "array",
+      "description": "Array of detected chords with timing",
+      "items": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Full chord symbol (e.g., 'Cmaj7', 'Am', 'D7')"
+          },
+          "root": {
+            "type": "string",
+            "description": "Chord root note (e.g., 'C', 'F#', 'Bb')"
+          },
+          "quality": {
+            "type": "string",
+            "description": "Chord quality (e.g., 'maj', 'min', '7', 'maj7', 'dim', 'aug')"
+          },
+          "bass": {
+            "type": ["string", "null"],
+            "description": "Bass note for inversions (e.g., 'E' for C/E)"
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Start time in seconds"
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "End time in seconds"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Confidence score for chord detection"
+          }
+        },
+        "required": ["symbol", "root", "quality", "start", "end"]
+      }
+    },
+    "notes": {
+      "type": "array",
+      "description": "Array of detected melody notes (optional)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pitch_midi": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127,
+            "description": "MIDI pitch value"
+          },
+          "pitch_name": {
+            "type": "string",
+            "description": "Note name (e.g., 'C4', 'F#5')"
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Start time in seconds"
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "End time in seconds"
+          },
+          "velocity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 127,
+            "description": "Note velocity (0-127)"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Confidence score for note detection"
+          }
+        },
+        "required": ["pitch_midi", "start", "end"]
+      }
+    },
+    "segments": {
+      "type": "array",
+      "description": "Array of song segments (verse, chorus, etc.)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["verse", "chorus", "bridge", "intro", "outro", "instrumental", "other"],
+            "description": "Type of segment"
+          },
+          "label": {
+            "type": "string",
+            "description": "Custom label for the segment"
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Start time in seconds"
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "End time in seconds"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Confidence score for segment detection"
+          }
+        },
+        "required": ["type", "start", "end"]
+      }
+    }
+  },
+  "required": ["metadata", "words"],
+  "additionalProperties": false
+}
