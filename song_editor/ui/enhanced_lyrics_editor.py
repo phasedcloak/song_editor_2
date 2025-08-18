@@ -269,8 +269,27 @@ class SyllablePanel(QWidget):
                 self.container_layout.addWidget(label)
                 continue
             
-            # Count syllables in this line
-            words = re.findall(r'\b\w+\b', line.lower())
+            # Count syllables in this line (exclude chord annotations)
+            # Simple string replacement to remove chord annotations like [C], [Am], etc.
+            line_without_chords = line
+            while '[' in line_without_chords and ']' in line_without_chords:
+                start = line_without_chords.find('[')
+                end = line_without_chords.find(']', start)
+                if end == -1:
+                    break
+                line_without_chords = line_without_chords[:start] + line_without_chords[end+1:]
+            
+            # Simple word extraction without regex
+            words = []
+            for word in line_without_chords.lower().split():
+                # Clean word of punctuation
+                clean_word = ''.join(c for c in word if c.isalpha())
+                if clean_word and len(clean_word) > 0:
+                    words.append(clean_word)
+            
+            # Filter out common chord names that might be mistaken for words
+            chord_names = {'c', 'g', 'd', 'a', 'e', 'b', 'f', 'am', 'em', 'bm', 'dm', 'gm', 'cm', 'fm'}
+            words = [word for word in words if word not in chord_names]
             total_syllables = sum(self.syllable_counter.count_syllables(word) for word in words)
             
             # Create label
@@ -527,8 +546,8 @@ class EnhancedLyricsEditor(QWidget):
         # Update syllable counts
         self.syllable_panel.update_counts('\n'.join(text_lines))
         
-        # Analyze rhymes for coloring
-        self.analyze_rhymes()
+        # Analyze rhymes for coloring (disabled temporarily due to recursion issues)
+        # self.analyze_rhymes()
     
     def on_text_changed(self):
         """Handle text changes"""
@@ -542,18 +561,25 @@ class EnhancedLyricsEditor(QWidget):
         # Update syllable counts (without triggering text changes)
         self.syllable_panel.update_counts(text)
         
-        # Re-analyze rhymes
-        self.analyze_rhymes()
+        # Re-analyze rhymes (disabled temporarily due to recursion issues)
+        # self.analyze_rhymes()
         
-        # Apply coloring
-        self.apply_coloring()
+        # Apply coloring (disabled temporarily due to recursion issues)
+        # self.apply_coloring()
     
 
     
     def analyze_rhymes(self):
         """Analyze rhyming patterns in the text"""
         text = self.text_edit.toPlainText()
-        words = re.findall(r'\b\w+\b', text.lower())
+        
+        # Simple word extraction without regex
+        words = []
+        for word in text.lower().split():
+            # Clean word of punctuation
+            clean_word = ''.join(c for c in word if c.isalpha())
+            if clean_word and len(clean_word) > 0:
+                words.append(clean_word)
         
         # Group words by rhyme patterns
         self.rhyme_groups = {}
