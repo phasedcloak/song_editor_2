@@ -417,6 +417,7 @@ class EnhancedLyricsEditor(QWidget):
         self.playback_thread = None
         self.color_mode = "confidence"  # "confidence" or "rhyme"
         self.rhyme_groups = {}
+        self._updating_text = False  # Flag to prevent recursion
         self.setup_ui()
     
     def setup_ui(self):
@@ -518,8 +519,10 @@ class EnhancedLyricsEditor(QWidget):
         if current_line:
             text_lines.append(' '.join(current_line))
         
-        # Set text in editor
+        # Set text in editor (prevent recursion)
+        self._updating_text = True
         self.text_edit.setPlainText('\n'.join(text_lines))
+        self._updating_text = False
         
         # Update syllable counts
         self.syllable_panel.update_counts('\n'.join(text_lines))
@@ -529,6 +532,10 @@ class EnhancedLyricsEditor(QWidget):
     
     def on_text_changed(self):
         """Handle text changes"""
+        # Prevent recursion when programmatically updating text
+        if self._updating_text:
+            return
+            
         text = self.text_edit.toPlainText()
         self.lyrics_changed.emit(text)
         
@@ -696,3 +703,106 @@ class EnhancedLyricsEditor(QWidget):
     def set_font(self, font: QFont):
         """Set font for the text editor"""
         self.text_edit.setFont(font)
+    
+    def merge_lines(self, line1_index: int, line2_index: int):
+        """Merge two lines into one"""
+        text = self.text_edit.toPlainText()
+        lines = text.split('\n')
+        
+        if 0 <= line1_index < len(lines) and 0 <= line2_index < len(lines):
+            # Merge the lines
+            merged_line = lines[line1_index].strip() + ' ' + lines[line2_index].strip()
+            
+            # Remove the second line and update the first
+            lines[line1_index] = merged_line
+            lines.pop(line2_index)
+            
+            # Update text (prevent recursion)
+            self._updating_text = True
+            self.text_edit.setPlainText('\n'.join(lines))
+            self._updating_text = False
+            
+            # Update syllable counts
+            self.syllable_panel.update_counts('\n'.join(lines))
+            
+            # Re-analyze rhymes
+            self.analyze_rhymes()
+            self.apply_coloring()
+    
+    def split_line(self, line_index: int, word_index: int):
+        """Split a line at a specific word"""
+        text = self.text_edit.toPlainText()
+        lines = text.split('\n')
+        
+        if 0 <= line_index < len(lines):
+            line = lines[line_index]
+            words = line.split()
+            
+            if 0 <= word_index < len(words):
+                # Split the line at the word
+                first_part = ' '.join(words[:word_index])
+                second_part = ' '.join(words[word_index:])
+                
+                # Replace the line with two new lines
+                lines[line_index] = first_part
+                lines.insert(line_index + 1, second_part)
+                
+                # Update text (prevent recursion)
+                self._updating_text = True
+                self.text_edit.setPlainText('\n'.join(lines))
+                self._updating_text = False
+                
+                # Update syllable counts
+                self.syllable_panel.update_counts('\n'.join(lines))
+                
+                # Re-analyze rhymes
+                self.analyze_rhymes()
+                self.apply_coloring()
+    
+    def add_chord_to_word(self, word: str, chord: str):
+        """Add or update a chord for a specific word"""
+        text = self.text_edit.toPlainText()
+        
+        # Find the word and add/update chord
+        import re
+        pattern = rf'\b{re.escape(word)}\b(?:\[[^\]]*\])?'
+        replacement = f"{word}[{chord}]"
+        
+        new_text = re.sub(pattern, replacement, text)
+        
+        if new_text != text:
+            # Update text (prevent recursion)
+            self._updating_text = True
+            self.text_edit.setPlainText(new_text)
+            self._updating_text = False
+            
+            # Update syllable counts
+            self.syllable_panel.update_counts(new_text)
+            
+            # Re-analyze rhymes
+            self.analyze_rhymes()
+            self.apply_coloring()
+    
+    def remove_chord_from_word(self, word: str):
+        """Remove chord from a specific word"""
+        text = self.text_edit.toPlainText()
+        
+        # Find the word with chord and remove it
+        import re
+        pattern = rf'\b{re.escape(word)}\[([^\]]*)\]'
+        replacement = word
+        
+        new_text = re.sub(pattern, replacement, text)
+        
+        if new_text != text:
+            # Update text (prevent recursion)
+            self._updating_text = True
+            self.text_edit.setPlainText(new_text)
+            self._updating_text = False
+            
+            # Update syllable counts
+            self.syllable_panel.update_counts(new_text)
+            
+            # Re-analyze rhymes
+            self.analyze_rhymes()
+            self.apply_coloring()
