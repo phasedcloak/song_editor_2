@@ -85,28 +85,25 @@ class RhymeAnalyzer:
         if word1 == word2:
             return False
         
-        pron1 = self.get_pronunciation(word1)
-        pron2 = self.get_pronunciation(word2)
-        
-        if not pron1 or not pron2:
-            return False
-        
-        return pronouncing.rhyme(pron1, pron2)
+        # Get rhymes for word1 and check if word2 is in the list
+        rhymes_list = pronouncing.rhymes(word1)
+        return word2.lower() in [r.lower() for r in rhymes_list]
     
     def are_near_rhymes(self, word1: str, word2: str) -> bool:
         """Check if two words are near rhymes (assonance)"""
         if word1 == word2:
             return False
         
-        pron1 = self.get_pronunciation(word1)
-        pron2 = self.get_pronunciation(word2)
+        # Get pronunciations
+        pron1 = pronouncing.phones_for_word(word1)
+        pron2 = pronouncing.phones_for_word(word2)
         
         if not pron1 or not pron2:
             return False
         
         # Check for assonance (same vowel sounds)
-        vowels1 = pronouncing.stresses(pron1)
-        vowels2 = pronouncing.stresses(pron2)
+        vowels1 = pronouncing.stresses(pron1[0])
+        vowels2 = pronouncing.stresses(pron2[0])
         
         return vowels1 == vowels2 and len(vowels1) > 0
     
@@ -128,6 +125,44 @@ class RhymeAnalyzer:
             'perfect': perfect_rhymes,
             'near': near_rhymes
         }
+
+    def dict_perfect_rhymes(self, target_word: str) -> List[str]:
+        """Return perfect rhymes from the CMU dict via pronouncing.rhymes"""
+        clean_word = re.sub(r'[^\w\s]', '', target_word.lower())
+        try:
+            return pronouncing.rhymes(clean_word)
+        except Exception:
+            return []
+
+    def dict_near_rhymes(self, target_word: str) -> List[str]:
+        """Return near rhymes using stress pattern similarity from CMU dict"""
+        clean_word = re.sub(r'[^\w\s]', '', target_word.lower())
+        try:
+            stresses_list = pronouncing.stresses_for_word(clean_word)
+            if not stresses_list:
+                return []
+            stress = stresses_list[0]
+            candidates = pronouncing.search_stresses(stress)
+            perfect = set(w.lower() for w in pronouncing.rhymes(clean_word))
+            result = []
+            for w in candidates:
+                wl = w.lower()
+                if wl == clean_word:
+                    continue
+                if wl in perfect:
+                    continue
+                result.append(w)
+            # Deduplicate while preserving order
+            seen = set()
+            deduped = []
+            for w in result:
+                if w.lower() in seen:
+                    continue
+                seen.add(w.lower())
+                deduped.append(w)
+            return deduped
+        except Exception:
+            return []
 
 
 class AudioPlaybackThread(QThread):
@@ -213,7 +248,7 @@ class SyllablePanel(QWidget):
         self.setMaximumWidth(120)
         self.setMinimumWidth(80)
     
-    def update_syllable_counts(self, lyrics_text: str):
+    def update_counts(self, lyrics_text: str):
         """Update syllable counts for the lyrics"""
         # Clear existing labels
         for i in reversed(range(self.container_layout.count())):
@@ -352,18 +387,15 @@ class RhymePanel(QWidget):
         
         self.current_word_label.setText(f"Word: {target_word}")
         
-        # Find rhymes
-        rhymes = self.rhyme_analyzer.find_rhymes(target_word, all_words)
-        
-        # Display perfect rhymes
-        perfect_rhymes = rhymes['perfect']
+        # Dictionary-based rhymes (CMU dict via pronouncing)
+        perfect_rhymes = self.rhyme_analyzer.dict_perfect_rhymes(target_word)
         if perfect_rhymes:
             self.perfect_rhymes_text.setPlainText(', '.join(perfect_rhymes))
         else:
             self.perfect_rhymes_text.setPlainText("None found")
         
-        # Display near rhymes
-        near_rhymes = rhymes['near']
+        # Dictionary-based near rhymes (stress-pattern similarity)
+        near_rhymes = self.rhyme_analyzer.dict_near_rhymes(target_word)
         if near_rhymes:
             self.near_rhymes_text.setPlainText(', '.join(near_rhymes))
         else:
@@ -490,7 +522,7 @@ class EnhancedLyricsEditor(QWidget):
         self.text_edit.setPlainText('\n'.join(text_lines))
         
         # Update syllable counts
-        self.update_syllable_counts()
+        self.syllable_panel.update_counts('\n'.join(text_lines))
         
         # Analyze rhymes for coloring
         self.analyze_rhymes()
@@ -500,8 +532,8 @@ class EnhancedLyricsEditor(QWidget):
         text = self.text_edit.toPlainText()
         self.lyrics_changed.emit(text)
         
-        # Update syllable counts
-        self.update_syllable_counts()
+        # Update syllable counts (without triggering text changes)
+        self.syllable_panel.update_counts(text)
         
         # Re-analyze rhymes
         self.analyze_rhymes()
@@ -509,10 +541,7 @@ class EnhancedLyricsEditor(QWidget):
         # Apply coloring
         self.apply_coloring()
     
-    def update_syllable_counts(self):
-        """Update syllable counts in the left panel"""
-        text = self.text_edit.toPlainText()
-        self.syllable_panel.update_syllable_counts(text)
+
     
     def analyze_rhymes(self):
         """Analyze rhyming patterns in the text"""
