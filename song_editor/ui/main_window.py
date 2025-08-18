@@ -36,6 +36,7 @@ from ..models.lyrics import WordRow
 from ..models.song_data_importer import SongDataImporter, SongData
 from ..processing.separate import separate_vocals_instrumental
 from .block_view import BlockView
+from .enhanced_lyrics_editor import EnhancedLyricsEditor
 
 
 from PySide6.QtGui import QColor
@@ -190,6 +191,15 @@ class MainWindow(QMainWindow):
 		# Set audio path for block view if we already have one
 		if hasattr(self, 'audio_path') and self.audio_path:
 			self.block_view.set_audio_path(self.audio_path)
+		
+		# Enhanced lyrics editor
+		self.enhanced_lyrics_editor = EnhancedLyricsEditor()
+		self.enhanced_lyrics_editor.lyrics_changed.connect(self.on_enhanced_lyrics_changed)
+		self.enhanced_lyrics_editor.play_audio_requested.connect(self.on_enhanced_play_audio_requested)
+		
+		# Set audio path for enhanced editor if we already have one
+		if hasattr(self, 'audio_path') and self.audio_path:
+			self.enhanced_lyrics_editor.set_audio_path(self.audio_path)
 
 		self.status = QStatusBar()
 		self.setStatusBar(self.status)
@@ -260,7 +270,7 @@ class MainWindow(QMainWindow):
 
 		# View mode selector
 		self.view_mode_combo = QComboBox()
-		self.view_mode_combo.addItems(["Table View", "Block View"])
+		self.view_mode_combo.addItems(["Table View", "Block View", "Enhanced Lyrics Editor"])
 		self.view_mode_combo.currentTextChanged.connect(self.on_view_mode_changed)
 		controls.addWidget(QLabel("View:"))
 		controls.addWidget(self.view_mode_combo)
@@ -314,12 +324,14 @@ class MainWindow(QMainWindow):
 		self.view_stack = QWidget()
 		self.view_layout = QVBoxLayout(self.view_stack)
 		
-		# Add both views to the stack
+		# Add all views to the stack
 		self.view_layout.addWidget(self.words_view)
 		self.view_layout.addWidget(self.block_view)
+		self.view_layout.addWidget(self.enhanced_lyrics_editor)
 		
 		# Start with table view visible
 		self.block_view.hide()
+		self.enhanced_lyrics_editor.hide()
 		
 		layout.addWidget(self.view_stack)
 
@@ -358,7 +370,7 @@ class MainWindow(QMainWindow):
 		self.apply_font_settings()
 
 	def apply_font_settings(self) -> None:
-		"""Apply current font settings to both views"""
+		"""Apply current font settings to all views"""
 		font_name = self.font_combo.currentText()
 		font_size = int(self.font_size_combo.currentText())
 		
@@ -374,6 +386,10 @@ class MainWindow(QMainWindow):
 		if hasattr(self, 'block_view'):
 			self.block_view.set_font(font)
 		
+		# Apply to enhanced lyrics editor
+		if hasattr(self, 'enhanced_lyrics_editor'):
+			self.enhanced_lyrics_editor.set_font(font)
+		
 		self.info(f"Font changed to {font_name} {font_size}pt")
 	
 	@Slot()
@@ -387,6 +403,11 @@ class MainWindow(QMainWindow):
 			for block_widget in self.block_view.block_widgets:
 				if hasattr(block_widget, 'duration_seconds'):
 					block_widget.duration_seconds = value
+		
+		# Sync duration to enhanced lyrics editor if it's visible
+		if hasattr(self, 'enhanced_lyrics_editor') and self.enhanced_lyrics_editor.isVisible():
+			# The enhanced editor uses the same duration for playback
+			pass  # Duration is handled in the playback request
 
 	@Slot()
 	def on_view_mode_changed(self, view_mode: str) -> None:
@@ -394,10 +415,19 @@ class MainWindow(QMainWindow):
 		if view_mode == "Table View":
 			self.words_view.show()
 			self.block_view.hide()
+			self.enhanced_lyrics_editor.hide()
 		elif view_mode == "Block View":
 			self.words_view.hide()
 			self.block_view.show()
+			self.enhanced_lyrics_editor.hide()
 			# Update block view with current data
+		elif view_mode == "Enhanced Lyrics Editor":
+			self.words_view.hide()
+			self.block_view.hide()
+			self.enhanced_lyrics_editor.show()
+			# Update enhanced editor with current data
+			if hasattr(self, 'words_model') and self.words_model.rows():
+				self.enhanced_lyrics_editor.set_lyrics_data(self.words_model.rows())
 			self.update_block_view()
 
 	@Slot()
@@ -438,6 +468,22 @@ class MainWindow(QMainWindow):
 		
 		# Create blocks from data (Gemini data is now shown in table view)
 		self.block_view.create_blocks_from_data(words, chords)
+		
+		# Update enhanced lyrics editor
+		if hasattr(self, 'enhanced_lyrics_editor'):
+			self.enhanced_lyrics_editor.set_lyrics_data(words)
+	
+	def on_enhanced_lyrics_changed(self, lyrics_text: str):
+		"""Handle enhanced lyrics editor text changes"""
+		# This could be used to sync changes back to the main model
+		# For now, just log the change
+		self.info("Enhanced lyrics editor text changed")
+	
+	def on_enhanced_play_audio_requested(self, start_time: float, duration: float):
+		"""Handle audio playback request from enhanced lyrics editor"""
+		if self.audio_path and os.path.exists(self.audio_path):
+			self.player.load_audio(self.audio_path)
+			self.player.play_segment(start_time, duration)
 
 	def load_audio_from_path(self, path: str) -> None:
 		"""Load audio from a specific file path (used for command line arguments)"""
@@ -621,6 +667,12 @@ class MainWindow(QMainWindow):
 		self.player.load(path)
 		self.info(f"Loaded: {os.path.basename(path)}")
 		
+		# Set audio path for all views
+		if hasattr(self, 'block_view'):
+			self.block_view.set_audio_path(path)
+		if hasattr(self, 'enhanced_lyrics_editor'):
+			self.enhanced_lyrics_editor.set_audio_path(path)
+		
 		# Check for pre-processed song data
 		song_data_path = self.song_data_importer.find_song_data_file(path)
 		if song_data_path:
@@ -694,6 +746,11 @@ class MainWindow(QMainWindow):
 		# Update block view if it's currently visible
 		if self.view_mode_combo.currentText() == "Block View":
 			self.update_block_view()
+		
+		# Update enhanced lyrics editor if it's currently visible
+		if self.view_mode_combo.currentText() == "Enhanced Lyrics Editor":
+			if hasattr(self, 'enhanced_lyrics_editor'):
+				self.enhanced_lyrics_editor.set_lyrics_data(rows)
 
 	@Slot()
 	def run_chords(self) -> None:
