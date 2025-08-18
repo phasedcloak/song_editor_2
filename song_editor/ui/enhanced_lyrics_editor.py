@@ -80,6 +80,67 @@ class RhymeAnalyzer:
             self.cache[word] = ""
             return ""
     
+    def rhyme_key(self, word: str) -> str:
+        """Create a stable rhyme key for a word using CMU phones if available.
+        Falls back to a simple textual heuristic to avoid heavy lookups.
+        """
+        try:
+            clean_word = re.sub(r'[^A-Za-z]', '', word.lower())
+            if not clean_word:
+                return ""
+            phones = pronouncing.phones_for_word(clean_word)
+            if phones:
+                try:
+                    # Use pronouncing.rhyming_part if available
+                    from pronouncing import rhyming_part
+                    key = rhyming_part(phones[0])
+                    return key or ""
+                except Exception:
+                    pass
+            # Fallback: last stressed-ish vowel cluster + coda (very rough)
+            vowels = "aeiouy"
+            reversed_word = clean_word[::-1]
+            cluster = []
+            seen_vowel = False
+            for ch in reversed_word:
+                cluster.append(ch)
+                if ch in vowels:
+                    seen_vowel = True
+                    # take 3 letters of tail once we saw a vowel
+                    if len(cluster) >= 3:
+                        break
+            return ''.join(cluster)[::-1]
+        except Exception:
+            return ""
+
+    def near_rhyme_key(self, word: str) -> str:
+        """Create a near-rhyme key using stress patterns and final consonants."""
+        try:
+            clean_word = re.sub(r'[^A-Za-z]', '', word.lower())
+            if not clean_word:
+                return ""
+            
+            # Try to get pronunciation first
+            phones = pronouncing.phones_for_word(clean_word)
+            if phones:
+                # Use stress pattern for near rhymes
+                stresses = pronouncing.stresses(phones[0])
+                if stresses:
+                    return stresses
+            
+            # Fallback: last stressed vowel + following consonants
+            vowels = "aeiouy"
+            i = len(clean_word) - 1
+            # Find last vowel
+            while i >= 0 and clean_word[i] not in vowels:
+                i -= 1
+            if i >= 0:
+                # Include the vowel and any following consonants
+                return clean_word[i:]
+            return ""
+        except Exception:
+            return ""
+
     def are_perfect_rhymes(self, word1: str, word2: str) -> bool:
         """Check if two words are perfect rhymes"""
         if word1 == word2:
@@ -90,7 +151,7 @@ class RhymeAnalyzer:
         return word2.lower() in [r.lower() for r in rhymes_list]
     
     def are_near_rhymes(self, word1: str, word2: str) -> bool:
-        """Check if two words are near rhymes (assonance)"""
+        """Check if two words are near rhymes (assonance) - simplified and more accurate"""
         if word1 == word2:
             return False
         
@@ -101,11 +162,47 @@ class RhymeAnalyzer:
         if not pron1 or not pron2:
             return False
         
-        # Check for assonance (same vowel sounds)
-        vowels1 = pronouncing.stresses(pron1[0])
-        vowels2 = pronouncing.stresses(pron2[0])
-        
-        return vowels1 == vowels2 and len(vowels1) > 0
+        # Use a simpler approach: check if they share the same final stressed vowel
+        # This is more reliable than complex stress pattern matching
+        try:
+            # Get the rhyming parts
+            rhyme1 = pronouncing.rhyming_part(pron1[0])
+            rhyme2 = pronouncing.rhyming_part(pron2[0])
+            
+            # If they have the same rhyming part, they're perfect rhymes, not near rhymes
+            if rhyme1 == rhyme2 and rhyme1:
+                return False
+            
+            # For near rhymes, check if they end with similar vowel sounds
+            # Extract the last vowel sound from each pronunciation
+            phones1 = pron1[0].split()
+            phones2 = pron2[0].split()
+            
+            last_vowel1 = None
+            last_vowel2 = None
+            
+            # Find the last vowel sound in each word
+            for phone in reversed(phones1):
+                if any(char.isdigit() for char in phone):  # Vowel sound
+                    last_vowel1 = phone
+                    break
+            
+            for phone in reversed(phones2):
+                if any(char.isdigit() for char in phone):  # Vowel sound
+                    last_vowel2 = phone
+                    break
+            
+            # Check if they have the same final vowel sound (ignoring stress)
+            if last_vowel1 and last_vowel2:
+                # Remove stress markers for comparison
+                vowel1_clean = ''.join(c for c in last_vowel1 if not c.isdigit())
+                vowel2_clean = ''.join(c for c in last_vowel2 if not c.isdigit())
+                return vowel1_clean == vowel2_clean
+            
+            return False
+            
+        except Exception:
+            return False
     
     def find_rhymes(self, target_word: str, word_list: List[str]) -> Dict[str, List[str]]:
         """Find perfect and near rhymes for a target word"""
@@ -228,17 +325,17 @@ class SyllablePanel(QWidget):
         """)
         layout.addWidget(header)
         
-        # Scroll area for syllable counts
+        # Scroll area for syllable counts (synchronized with text editor)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Hide scroll bar
         self.scroll_area.setMaximumWidth(100)
         
         # Container for syllable labels
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setSpacing(2)
+        self.container_layout.setSpacing(0)  # No spacing for better alignment
         self.container_layout.setContentsMargins(5, 5, 5, 5)
         
         self.scroll_area.setWidget(self.container)
@@ -292,7 +389,7 @@ class SyllablePanel(QWidget):
             words = [word for word in words if word not in chord_names]
             total_syllables = sum(self.syllable_counter.count_syllables(word) for word in words)
             
-            # Create label
+            # Create label with height matching text editor line height
             label = QLabel(f"{total_syllables}")
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("""
@@ -300,16 +397,24 @@ class SyllablePanel(QWidget):
                     background-color: #e8f4f8;
                     border: 1px solid #ccc;
                     border-radius: 3px;
-                    padding: 3px;
+                    padding: 4px;
                     font-weight: bold;
                     color: #333;
+                    margin: 1px;
                 }
             """)
-            label.setMinimumHeight(20)
+            # Match the text editor's line height (approximately)
+            # Use a more reasonable height that matches typical text editor line height
+            label.setFixedHeight(20)  # Standard line height
             self.container_layout.addWidget(label)
         
         # Add stretch at the end
         self.container_layout.addStretch()
+    
+    def sync_syllable_scroll(self, value):
+        """Synchronize syllable panel scrolling with text editor"""
+        if hasattr(self, 'scroll_area'):
+            self.scroll_area.verticalScrollBar().setValue(value)
 
 
 class RhymePanel(QWidget):
@@ -436,7 +541,15 @@ class EnhancedLyricsEditor(QWidget):
         self.playback_thread = None
         self.color_mode = "confidence"  # "confidence" or "rhyme"
         self.rhyme_groups = {}
+        self.near_rhyme_groups = {}
+        self._rhyme_key_cache = {}
+        self._near_key_cache = {}
         self._updating_text = False  # Flag to prevent recursion
+        # Debounce timer for heavy analysis/formatting
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(250)
+        self._debounce_timer.timeout.connect(self._analyze_and_color)
         self.setup_ui()
     
     def setup_ui(self):
@@ -461,6 +574,9 @@ class EnhancedLyricsEditor(QWidget):
         
         # Set splitter proportions
         self.splitter.setSizes([100, 400, 200])
+        
+        # Connect text editor scrolling to syllable panel
+        self.text_edit.verticalScrollBar().valueChanged.connect(self.sync_syllable_scroll)
         
         layout.addWidget(self.splitter)
     
@@ -491,6 +607,8 @@ class EnhancedLyricsEditor(QWidget):
         self.text_edit.setPlaceholderText("Enter lyrics here...")
         self.text_edit.textChanged.connect(self.on_text_changed)
         self.text_edit.mouseDoubleClickEvent = self.on_double_click
+        # Synchronize scrolling with syllable panel
+        self.text_edit.verticalScrollBar().valueChanged.connect(self.sync_syllable_scroll)
         self.text_edit.setStyleSheet("""
             QTextEdit {
                 background-color: #ffffff;
@@ -546,8 +664,8 @@ class EnhancedLyricsEditor(QWidget):
         # Update syllable counts
         self.syllable_panel.update_counts('\n'.join(text_lines))
         
-        # Analyze rhymes for coloring (disabled temporarily due to recursion issues)
-        # self.analyze_rhymes()
+        # Analyze rhymes for coloring (debounced)
+        self._debounce_timer.start(10)
     
     def on_text_changed(self):
         """Handle text changes"""
@@ -561,47 +679,92 @@ class EnhancedLyricsEditor(QWidget):
         # Update syllable counts (without triggering text changes)
         self.syllable_panel.update_counts(text)
         
-        # Re-analyze rhymes (disabled temporarily due to recursion issues)
-        # self.analyze_rhymes()
-        
-        # Apply coloring (disabled temporarily due to recursion issues)
-        # self.apply_coloring()
+        # Debounce rhyme analysis + coloring
+        self._debounce_timer.start(250)
+
+    def _reset_formatting(self):
+        """Reset all text formatting to default before applying new coloring."""
+        cursor = self.text_edit.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.Document)
+        default_format = QTextCharFormat()
+        cursor.setCharFormat(default_format)
+        cursor.clearSelection()
+        cursor.endEditBlock()
+
+    def _analyze_and_color(self):
+        """Analyze rhymes and apply coloring according to current mode."""
+        self.analyze_rhymes()
+        self._reset_formatting()
+        self.apply_coloring()
     
 
     
     def analyze_rhymes(self):
-        """Analyze rhyming patterns in the text"""
+        """Analyze rhyming patterns using pronunciation-based grouping with fallbacks."""
         text = self.text_edit.toPlainText()
-        
-        # Simple word extraction without regex
+        # Remove chord annotations like [C]
+        clean_text = text
+        while '[' in clean_text and ']' in clean_text:
+            start = clean_text.find('[')
+            end = clean_text.find(']', start)
+            if end == -1:
+                break
+            clean_text = clean_text[:start] + clean_text[end+1:]
+
+        # Simple word extraction
         words = []
-        for word in text.lower().split():
-            # Clean word of punctuation
-            clean_word = ''.join(c for c in word if c.isalpha())
-            if clean_word and len(clean_word) > 0:
-                words.append(clean_word)
-        
-        # Group words by rhyme patterns
+        for word in clean_text.lower().split():
+            cleaned = ''.join(c for c in word if c.isalpha())
+            if cleaned:
+                words.append(cleaned)
+
+        unique_words = list(dict.fromkeys(words))
+        # Build perfect rhyme groups by rhyme_key
+        key_to_words = {}
+        for w in unique_words:
+            if w in self._rhyme_key_cache:
+                key = self._rhyme_key_cache[w]
+            else:
+                key = self.rhyme_analyzer.rhyme_key(w)
+                self._rhyme_key_cache[w] = key
+            if not key:
+                continue
+            key_to_words.setdefault(key, []).append(w)
+
         self.rhyme_groups = {}
         group_id = 0
-        
-        for i, word1 in enumerate(words):
-            if word1 in self.rhyme_groups:
+        for key, group_words in key_to_words.items():
+            if len(group_words) < 2:
                 continue
-            
-            # Find all words that rhyme with this word
-            rhyming_words = []
-            for j, word2 in enumerate(words):
-                if i != j and self.rhyme_analyzer.are_perfect_rhymes(word1, word2):
-                    rhyming_words.append(word2)
-            
-            if rhyming_words:
-                # Create a rhyme group
-                group_id += 1
-                group_name = f"group_{group_id}"
-                self.rhyme_groups[word1] = group_name
-                for word in rhyming_words:
-                    self.rhyme_groups[word] = group_name
+            group_id += 1
+            group_name = f"group_{group_id}"
+            for w in group_words:
+                self.rhyme_groups[w] = group_name
+
+        # Near rhyme groups by near_rhyme_key (exclude words already in perfect groups)
+        near_key_to_words = {}
+        for w in unique_words:
+            if w in self.rhyme_groups:
+                continue
+            if w in self._near_key_cache:
+                nkey = self._near_key_cache[w]
+            else:
+                nkey = self.rhyme_analyzer.near_rhyme_key(w)
+                self._near_key_cache[w] = nkey
+            if not nkey:
+                continue
+            near_key_to_words.setdefault(nkey, []).append(w)
+
+        self.near_rhyme_groups = {}
+        near_id = 0
+        for nkey, group_words in near_key_to_words.items():
+            if len(group_words) < 2:
+                continue
+            near_id += 1
+            group_name = f"near_{near_id}"
+            for w in group_words:
+                self.near_rhyme_groups[w] = group_name
     
     def apply_coloring(self):
         """Apply color coding based on current mode"""
@@ -637,44 +800,44 @@ class EnhancedLyricsEditor(QWidget):
                 search_cursor.mergeCharFormat(format)
     
     def apply_rhyme_coloring(self):
-        """Apply rhyme-based color coding"""
-        # Define colors for rhyme groups
+        """Apply rhyme-based color coding. Perfect groups are bold; near groups not bold."""
         colors = [
-            QColor(255, 0, 0),    # Red
-            QColor(0, 255, 0),    # Green
-            QColor(0, 0, 255),    # Blue
-            QColor(255, 165, 0),  # Orange
-            QColor(128, 0, 128),  # Purple
-            QColor(255, 192, 203), # Pink
-            QColor(0, 255, 255),  # Cyan
-            QColor(255, 255, 0),  # Yellow
+            QColor(255, 0, 0), QColor(0, 128, 0), QColor(0, 0, 200), QColor(200, 120, 0),
+            QColor(128, 0, 128), QColor(200, 0, 100), QColor(0, 160, 160), QColor(160, 160, 0),
         ]
-        
-        cursor = self.text_edit.textCursor()
-        cursor.movePosition(QTextCursor.Start)
-        
-        # Group words by their rhyme group
-        group_words = {}
-        for word, group in self.rhyme_groups.items():
-            if group not in group_words:
-                group_words[group] = []
-            group_words[group].append(word)
-        
-        # Apply colors to each group
-        for i, (group_name, words) in enumerate(group_words.items()):
-            if i >= len(colors):
-                break
-            
-            color = colors[i]
-            format = QTextCharFormat()
-            format.setForeground(color)
-            format.setFontWeight(QFont.Bold)
-            
-            # Apply formatting to all words in this group
-            for word in words:
-                search_cursor = self.text_edit.document().find(word, cursor)
-                if not search_cursor.isNull():
-                    search_cursor.mergeCharFormat(format)
+        doc = self.text_edit.document()
+
+        # Apply perfect rhyme groups first (bold)
+        group_to_words = {}
+        for w, g in self.rhyme_groups.items():
+            group_to_words.setdefault(g, []).append(w)
+
+        for i, (group_name, words) in enumerate(group_to_words.items()):
+            color = colors[i % len(colors)]
+            fmt = QTextCharFormat()
+            fmt.setForeground(color)
+            fmt.setFontWeight(QFont.Bold)
+            for w in words:
+                cursor = doc.find(w)
+                while not cursor.isNull():
+                    cursor.mergeCharFormat(fmt)
+                    cursor = doc.find(w, cursor)
+
+        # Apply near rhyme groups (same palette, not bold)
+        near_group_to_words = {}
+        for w, g in self.near_rhyme_groups.items():
+            near_group_to_words.setdefault(g, []).append(w)
+
+        for i, (group_name, words) in enumerate(near_group_to_words.items()):
+            color = colors[i % len(colors)]
+            fmt = QTextCharFormat()
+            fmt.setForeground(color)
+            fmt.setFontWeight(QFont.Normal)
+            for w in words:
+                cursor = doc.find(w)
+                while not cursor.isNull():
+                    cursor.mergeCharFormat(fmt)
+                    cursor = doc.find(w, cursor)
     
     def on_color_mode_changed(self, checked: bool):
         """Handle color mode toggle"""
