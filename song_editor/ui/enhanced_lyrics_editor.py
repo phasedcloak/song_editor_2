@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLabel, 
     QPushButton, QScrollArea, QFrame, QSplitter, QCheckBox,
-    QToolTip, QApplication
+    QToolTip, QApplication, QSizePolicy, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import (
@@ -114,7 +114,7 @@ class RhymeAnalyzer:
             return ""
 
     def near_rhyme_key(self, word: str) -> str:
-        """Create a near-rhyme key using stress patterns and final consonants."""
+        """Create a near-rhyme key using final vowel sound (ignoring stress)."""
         try:
             clean_word = re.sub(r'[^A-Za-z]', '', word.lower())
             if not clean_word:
@@ -123,20 +123,22 @@ class RhymeAnalyzer:
             # Try to get pronunciation first
             phones = pronouncing.phones_for_word(clean_word)
             if phones:
-                # Use stress pattern for near rhymes
-                stresses = pronouncing.stresses(phones[0])
-                if stresses:
-                    return stresses
-            
-            # Fallback: last stressed vowel + following consonants
+                # Extract the last vowel sound from pronunciation
+                phone_list = phones[0].split()
+                last_vowel = None
+                
+                # Find the last vowel sound in the word
+                for phone in reversed(phone_list):
+                    if any(char.isdigit() for char in phone):  # Vowel sound
+                        # Remove stress markers for comparison
+                        vowel_clean = ''.join(c for c in phone if not c.isdigit())
+                        return vowel_clean
+                
+            # Fallback: last vowel in the word
             vowels = "aeiouy"
-            i = len(clean_word) - 1
-            # Find last vowel
-            while i >= 0 and clean_word[i] not in vowels:
-                i -= 1
-            if i >= 0:
-                # Include the vowel and any following consonants
-                return clean_word[i:]
+            for i in range(len(clean_word) - 1, -1, -1):
+                if clean_word[i] in vowels:
+                    return clean_word[i]
             return ""
         except Exception:
             return ""
@@ -197,7 +199,17 @@ class RhymeAnalyzer:
                 # Remove stress markers for comparison
                 vowel1_clean = ''.join(c for c in last_vowel1 if not c.isdigit())
                 vowel2_clean = ''.join(c for c in last_vowel2 if not c.isdigit())
-                return vowel1_clean == vowel2_clean
+                
+                # Only consider them near rhymes if they have the same final vowel
+                # AND they're not already perfect rhymes
+                if vowel1_clean == vowel2_clean:
+                    # Additional check: make sure they're not too similar
+                    # If they share the same rhyme key, they're perfect rhymes, not near rhymes
+                    key1 = self.rhyme_key(word1)
+                    key2 = self.rhyme_key(word2)
+                    if key1 == key2 and key1:
+                        return False
+                    return True
             
             return False
             
@@ -325,25 +337,38 @@ class SyllablePanel(QWidget):
         """)
         layout.addWidget(header)
         
+        # Spacer to align the top of counts with the top of the QTextEdit area (controls height)
+        self.top_spacer = QWidget()
+        self.top_spacer.setFixedHeight(0)
+        layout.addWidget(self.top_spacer)
+        
         # Scroll area for syllable counts (synchronized with text editor)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Hide scroll bar
+        self.scroll_area.setAlignment(Qt.AlignTop)
         self.scroll_area.setMaximumWidth(100)
         
         # Container for syllable labels
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setSpacing(0)  # No spacing for better alignment
-        self.container_layout.setContentsMargins(5, 5, 5, 5)
+        self.container_layout.setSpacing(2)  # Small spacing for better visual separation
+        self.container_layout.setContentsMargins(5, 0, 5, 5)
+        # Ensure items stack from top to bottom and are aligned to top
+        try:
+            from PySide6.QtWidgets import QBoxLayout
+            self.container_layout.setDirection(QBoxLayout.TopToBottom)
+        except Exception:
+            pass
+        self.container_layout.setAlignment(Qt.AlignTop)
         
         self.scroll_area.setWidget(self.container)
         layout.addWidget(self.scroll_area)
         
-        # Set fixed width
-        self.setMaximumWidth(120)
-        self.setMinimumWidth(80)
+        # Set fixed width (keep it compact)
+        self.setMaximumWidth(100)
+        self.setMinimumWidth(60)
     
     def update_counts(self, lyrics_text: str):
         """Update syllable counts for the lyrics"""
@@ -360,9 +385,17 @@ class SyllablePanel(QWidget):
         
         for line in lines:
             if not line.strip():
-                # Empty line
+                # Empty line - create a spacer to maintain alignment
                 label = QLabel("")
-                label.setMinimumHeight(20)
+                label.setFixedHeight(18)
+                label.setFixedWidth(40)
+                label.setStyleSheet("""
+                    QLabel {
+                        background-color: transparent;
+                        border: none;
+                        margin: 0px;
+                    }
+                """)
                 self.container_layout.addWidget(label)
                 continue
             
@@ -391,30 +424,39 @@ class SyllablePanel(QWidget):
             
             # Create label with height matching text editor line height
             label = QLabel(f"{total_syllables}")
-            label.setAlignment(Qt.AlignCenter)
+            label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
             label.setStyleSheet("""
                 QLabel {
                     background-color: #e8f4f8;
                     border: 1px solid #ccc;
                     border-radius: 3px;
-                    padding: 4px;
+                    padding: 2px 6px;
                     font-weight: bold;
                     color: #333;
-                    margin: 1px;
+                    margin: 0px;
+                    min-height: 18px;
+                    max-height: 18px;
                 }
             """)
-            # Match the text editor's line height (approximately)
-            # Use a more reasonable height that matches typical text editor line height
-            label.setFixedHeight(20)  # Standard line height
+            # Set a consistent height that matches typical text editor line height
+            label.setFixedHeight(18)
+            label.setFixedWidth(40)  # Fixed width for consistent alignment
             self.container_layout.addWidget(label)
         
-        # Add stretch at the end
-        self.container_layout.addStretch()
+        # Ensure scroll area shows from top and no extra stretch pushes content
+        # Reset scroll to top
+        if hasattr(self, 'scroll_area'):
+            self.scroll_area.verticalScrollBar().setValue(0)
     
     def sync_syllable_scroll(self, value):
         """Synchronize syllable panel scrolling with text editor"""
         if hasattr(self, 'scroll_area'):
             self.scroll_area.verticalScrollBar().setValue(value)
+
+    def set_top_offset(self, pixels: int):
+        """Set a fixed spacer above the counts to align with the editor's controls row."""
+        if hasattr(self, 'top_spacer'):
+            self.top_spacer.setFixedHeight(max(0, pixels))
 
 
 class RhymePanel(QWidget):
@@ -466,6 +508,7 @@ class RhymePanel(QWidget):
         self.perfect_rhymes_text = QTextEdit()
         self.perfect_rhymes_text.setMaximumHeight(100)
         self.perfect_rhymes_text.setReadOnly(True)
+        self.perfect_rhymes_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.perfect_rhymes_text.setStyleSheet("""
             QTextEdit {
                 background-color: #d4edda;
@@ -484,6 +527,7 @@ class RhymePanel(QWidget):
         self.near_rhymes_text = QTextEdit()
         self.near_rhymes_text.setMaximumHeight(100)
         self.near_rhymes_text.setReadOnly(True)
+        self.near_rhymes_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.near_rhymes_text.setStyleSheet("""
             QTextEdit {
                 background-color: #fff3cd;
@@ -494,8 +538,8 @@ class RhymePanel(QWidget):
         """)
         layout.addWidget(self.near_rhymes_text)
         
-        # Set fixed width
-        self.setMaximumWidth(200)
+        # Allow panel to expand with window width
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.setMinimumWidth(150)
     
     def update_rhymes(self, target_word: str, all_words: List[str]):
@@ -572,13 +616,30 @@ class EnhancedLyricsEditor(QWidget):
         self.rhyme_panel = RhymePanel()
         self.splitter.addWidget(self.rhyme_panel)
         
-        # Set splitter proportions
-        self.splitter.setSizes([100, 400, 200])
-        
-        # Connect text editor scrolling to syllable panel
-        self.text_edit.verticalScrollBar().valueChanged.connect(self.sync_syllable_scroll)
+        # Set initial splitter proportions (center gets most space)
+        self.splitter.setSizes([100, 400, 300])
+        # Set stretch factors: 60% center, 40% right panel (left stays compact)
+        self.splitter.setStretchFactor(0, 0)  # Left panel doesn't grow
+        self.splitter.setStretchFactor(1, 3)  # Center panel (60% equivalent)
+        self.splitter.setStretchFactor(2, 2)  # Right panel (40% equivalent)
+        # Prevent center pane from collapsing
+        try:
+            self.splitter.setCollapsible(0, True)
+            self.splitter.setCollapsible(1, False)
+            self.splitter.setCollapsible(2, True)
+        except Exception:
+            pass
         
         layout.addWidget(self.splitter)
+        
+        # Ensure all widgets are visible
+        self.syllable_panel.show()
+        self.lyrics_panel.show()
+        self.rhyme_panel.show()
+        self.splitter.show()
+        
+        # Connect text editor scrolling to syllable panel (after UI is set up)
+        self.text_edit.verticalScrollBar().valueChanged.connect(self.on_text_scroll)
     
     def create_lyrics_panel(self):
         """Create the main lyrics editing panel"""
@@ -599,16 +660,48 @@ class EnhancedLyricsEditor(QWidget):
         self.play_button.clicked.connect(self.play_current_selection)
         controls_layout.addWidget(self.play_button)
         
+        # Font controls
+        controls_layout.addWidget(QLabel("Font:"))
+        self.font_combo = QComboBox()
+        self.font_combo.addItems(["Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Georgia", "Palatino"])
+        self.font_combo.setCurrentText("Arial")
+        self.font_combo.currentTextChanged.connect(self.on_font_changed)
+        controls_layout.addWidget(self.font_combo)
+        
+        controls_layout.addWidget(QLabel("Size:"))
+        self.font_size_combo = QComboBox()
+        self.font_size_combo.addItems(["10", "12", "14", "16", "18", "20", "24", "28", "32"])
+        self.font_size_combo.setCurrentText("14")
+        self.font_size_combo.currentTextChanged.connect(self.on_font_size_changed)
+        controls_layout.addWidget(self.font_size_combo)
+        
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
+        
+        # No top offset; we align counts to top of editor area
         
         # Main text editor
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText("Enter lyrics here...")
         self.text_edit.textChanged.connect(self.on_text_changed)
         self.text_edit.mouseDoubleClickEvent = self.on_double_click
-        # Synchronize scrolling with syllable panel
-        self.text_edit.verticalScrollBar().valueChanged.connect(self.sync_syllable_scroll)
+        # Ensure visible and readable text (explicit palette)
+        try:
+            pal = self.text_edit.palette()
+            pal.setColor(QPalette.Base, QColor(255, 255, 255))
+            pal.setColor(QPalette.Text, QColor(0, 0, 0))
+            self.text_edit.setPalette(pal)
+        except Exception:
+            pass
+        self.text_edit.setVisible(True)
+        # Ensure the editor expands and has a reasonable minimum size
+        try:
+            self.text_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
+        self.text_edit.setMinimumSize(300, 200)
+        # Connect resize event to handle auto-wrapping
+        self.text_edit.resizeEvent = self.on_text_edit_resize
         self.text_edit.setStyleSheet("""
             QTextEdit {
                 background-color: #ffffff;
@@ -647,8 +740,11 @@ class EnhancedLyricsEditor(QWidget):
             
             current_line.append(word_text)
             
-            # Check if this word ends with punctuation that suggests end of line
-            if word.text.endswith(('.', '!', '?', ':', ';')):
+            # Check for line break (either from punctuation or stored line_break flag)
+            should_break = (word.text.endswith(('.', '!', '?', ':', ';')) or 
+                           getattr(word, 'line_break', False))
+            
+            if should_break:
                 text_lines.append(' '.join(current_line))
                 current_line = []
         
@@ -658,11 +754,17 @@ class EnhancedLyricsEditor(QWidget):
         
         # Set text in editor (prevent recursion)
         self._updating_text = True
-        self.text_edit.setPlainText('\n'.join(text_lines))
+        final_text = '\n'.join(text_lines)
+        self.text_edit.setPlainText(final_text)
         self._updating_text = False
         
         # Update syllable counts
         self.syllable_panel.update_counts('\n'.join(text_lines))
+        # Ensure syllable panel scrolls to top initially
+        self.syllable_panel.sync_syllable_scroll(0)
+        
+        # Apply auto-wrapping after setting text (with a small delay)
+        QTimer.singleShot(100, self.apply_auto_wrapping)
         
         # Analyze rhymes for coloring (debounced)
         self._debounce_timer.start(10)
@@ -678,6 +780,8 @@ class EnhancedLyricsEditor(QWidget):
         
         # Update syllable counts (without triggering text changes)
         self.syllable_panel.update_counts(text)
+        # Keep scroll positions in sync proportionally
+        self.syllable_panel.sync_syllable_scroll(self.text_edit.verticalScrollBar().value())
         
         # Debounce rhyme analysis + coloring
         self._debounce_timer.start(250)
@@ -720,9 +824,17 @@ class EnhancedLyricsEditor(QWidget):
                 words.append(cleaned)
 
         unique_words = list(dict.fromkeys(words))
-        # Build perfect rhyme groups by rhyme_key
+        
+        # Initialize groups
+        self.rhyme_groups = {}
+        self.near_rhyme_groups = {}
+        
+        # Use proper rhyme analysis - no arbitrary grouping
+        remaining_words = unique_words
+        
+        # Build perfect rhyme groups by rhyme_key for remaining words
         key_to_words = {}
-        for w in unique_words:
+        for w in remaining_words:
             if w in self._rhyme_key_cache:
                 key = self._rhyme_key_cache[w]
             else:
@@ -732,8 +844,7 @@ class EnhancedLyricsEditor(QWidget):
                 continue
             key_to_words.setdefault(key, []).append(w)
 
-        self.rhyme_groups = {}
-        group_id = 0
+        group_id = 0  # Start from 0 since we removed manual groups
         for key, group_words in key_to_words.items():
             if len(group_words) < 2:
                 continue
@@ -742,10 +853,10 @@ class EnhancedLyricsEditor(QWidget):
             for w in group_words:
                 self.rhyme_groups[w] = group_name
 
-        # Near rhyme groups by near_rhyme_key (exclude words already in perfect groups)
+        # Near rhyme groups by near_rhyme_key for remaining words
         near_key_to_words = {}
-        for w in unique_words:
-            if w in self.rhyme_groups:
+        for w in remaining_words:
+            if w in self.rhyme_groups:  # Skip words already in perfect rhyme groups
                 continue
             if w in self._near_key_cache:
                 nkey = self._near_key_cache[w]
@@ -756,8 +867,7 @@ class EnhancedLyricsEditor(QWidget):
                 continue
             near_key_to_words.setdefault(nkey, []).append(w)
 
-        self.near_rhyme_groups = {}
-        near_id = 0
+        near_id = 0  # Start from 0 since we removed manual groups
         for nkey, group_words in near_key_to_words.items():
             if len(group_words) < 2:
                 continue
@@ -807,7 +917,29 @@ class EnhancedLyricsEditor(QWidget):
         ]
         doc = self.text_edit.document()
 
-        # Apply perfect rhyme groups first (bold)
+        # First, set all words to black (default for non-rhyming words)
+        black_fmt = QTextCharFormat()
+        black_fmt.setForeground(QColor(0, 0, 0))
+        black_fmt.setFontWeight(QFont.Normal)
+        
+        # Get all words from the text
+        text = self.text_edit.toPlainText()
+        all_words = []
+        for line in text.split('\n'):
+            for word in line.split():
+                # Clean word of punctuation and brackets
+                clean_word = ''.join(c for c in word if c.isalpha())
+                if clean_word:
+                    all_words.append(clean_word.lower())
+        
+        # Set all words to black first
+        for word in set(all_words):
+            cursor = doc.find(word)
+            while not cursor.isNull():
+                cursor.mergeCharFormat(black_fmt)
+                cursor = doc.find(word, cursor)
+
+        # Apply perfect rhyme groups (bold)
         group_to_words = {}
         for w, g in self.rhyme_groups.items():
             group_to_words.setdefault(g, []).append(w)
@@ -838,6 +970,11 @@ class EnhancedLyricsEditor(QWidget):
                 while not cursor.isNull():
                     cursor.mergeCharFormat(fmt)
                     cursor = doc.find(w, cursor)
+    
+    def on_text_scroll(self, value):
+        """Handle text editor scrolling and sync with syllable panel"""
+        if hasattr(self, 'syllable_panel'):
+            self.syllable_panel.sync_syllable_scroll(value)
     
     def on_color_mode_changed(self, checked: bool):
         """Handle color mode toggle"""
@@ -892,6 +1029,118 @@ class EnhancedLyricsEditor(QWidget):
     def set_font(self, font: QFont):
         """Set font for the text editor"""
         self.text_edit.setFont(font)
+    
+    def on_font_changed(self, font_name: str):
+        """Handle font family change"""
+        self.apply_font_settings()
+    
+    def on_font_size_changed(self, font_size: str):
+        """Handle font size change"""
+        self.apply_font_settings()
+    
+    def apply_font_settings(self):
+        """Apply current font settings"""
+        font_name = self.font_combo.currentText()
+        font_size = int(self.font_size_combo.currentText())
+        
+        # Create font
+        font = QFont(font_name, font_size)
+        self.text_edit.setFont(font)
+        
+        # Re-apply auto-wrapping after font change
+        self.apply_auto_wrapping()
+    
+    def on_text_edit_resize(self, event):
+        """Handle text editor resize to re-apply auto-wrapping"""
+        # Call the original resize event
+        super(QTextEdit, self.text_edit).resizeEvent(event)
+        # Apply auto-wrapping after resize
+        self.apply_auto_wrapping()
+    
+    def apply_auto_wrapping(self):
+        """Automatically insert line breaks when text wraps"""
+        if not self.lyrics_data:
+            return
+        
+        # Get current text and document
+        text = self.text_edit.toPlainText()
+        
+        # Don't apply auto-wrapping if there's no text yet
+        if not text.strip():
+            return
+        
+        # Get the width of the text editor (minus margins)
+        editor_width = self.text_edit.viewport().width() - 20  # Account for margins
+        
+        # Don't apply if editor width is too small
+        if editor_width < 100:
+            return
+        
+        # Get font metrics for accurate width calculation
+        font = self.text_edit.font()
+        font_metrics = self.text_edit.fontMetrics()
+        
+        # Process each line to check for wrapping
+        lines = text.split('\n')
+        new_lines = []
+        
+        for line in lines:
+            if not line.strip():
+                new_lines.append(line)
+                continue
+            
+            # Check if this line would wrap
+            words = line.split()
+            if not words:
+                new_lines.append(line)
+                continue
+            
+            # Build line word by word to check width
+            current_line = []
+            current_width = 0
+            
+            for word in words:
+                # Calculate actual word width using font metrics
+                word_width = font_metrics.horizontalAdvance(word)
+                space_width = font_metrics.horizontalAdvance(' ')
+                
+                if current_width + word_width > editor_width and current_line:
+                    # This word would cause wrapping, insert line break before it
+                    new_lines.append(' '.join(current_line))
+                    current_line = [word]
+                    current_width = word_width
+                else:
+                    current_line.append(word)
+                    current_width += word_width + space_width
+            
+            # Add the last line
+            if current_line:
+                new_lines.append(' '.join(current_line))
+        
+        # Update the text if changes were made
+        new_text = '\n'.join(new_lines)
+        if new_text != text:
+            # Prevent recursion
+            self._updating_text = True
+            self.text_edit.setPlainText(new_text)
+            self._updating_text = False
+            
+            # Update the lyrics data with line break information
+            self.update_lyrics_data_with_line_breaks(new_text)
+    
+    def update_lyrics_data_with_line_breaks(self, text: str):
+        """Update lyrics data to include line break information"""
+        lines = text.split('\n')
+        word_index = 0
+        
+        for line in lines:
+            words_in_line = line.split()
+            for i, word in enumerate(words_in_line):
+                if word_index < len(self.lyrics_data):
+                    # Check if this word should have a line break after it
+                    is_last_word_in_line = (i == len(words_in_line) - 1)
+                    self.lyrics_data[word_index].line_break = is_last_word_in_line
+                word_index += 1
     
     def merge_lines(self, line1_index: int, line2_index: int):
         """Merge two lines into one"""
